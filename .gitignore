@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+state/
+assets/downloads/
+.DS_Store
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+.python-version
+AGENTS.md
+login_post.txt
+curl.txt

@@ -1,0 +1,74 @@
+china:
+  base_url: "https://connect.garmin.cn"
+  headers:
+    Accept: "*/*"
+    User-Agent: "Mozilla/5.0"
+    X-Requested-With: "XMLHttpRequest"
+    Origin: "https://connect.garmin.cn"
+    Referer: "https://connect.garmin.cn/modern/"
+    x-app-ver: "5.20.2.3a"
+  auth:
+    type: "playwright_login" # session_cookie: 直接使用浏览器里复制的 Cookie 字符串; playwright_login: 用 Playwright 自动登录获取 Cookie
+    username: "username_cn"
+    password: "password_cn"
+    sso_base_url: "https://sso.garmin.cn"
+    client_id: "GarminConnect"
+    locale: "zh-CN"
+    service_url: "https://connect.garmin.cn/app"
+    remember_me: true
+    captcha_token: ""
+    user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+    headless: false # Playwright 是否无头运行（true=不显示浏览器）
+    login_debug: false # 输出登录过程的详细日志
+    manual_login: false # 自动填表单前暂停，手动完成登录
+  endpoints:
+    list_activities: "/gc-api/activitylist-service/activities/search/activities"
+    download_activity: "/gc-api/download-service/files/activity/{activity_id}"
+  list_params:
+    activityType: "cycling" # 运动类型筛选（可为空或删除）
+    start: 0 # 分页起始位置
+    limit: 20 # 列表拉取条数（会自动提升到 >= sync.limit）
+    excludeChildren: false # 是否排除子活动
+  id_field: "activityId"
+  sort_key: "startTimeGMT"
+
+global:
+  base_url: "https://connect.garmin.com"
+  headers:
+    Accept: "*/*"
+    User-Agent: "Mozilla/5.0"
+    X-Requested-With: "XMLHttpRequest"
+    Origin: "https://connect.garmin.com"
+    Referer: "https://connect.garmin.com/app/"
+    x-app-ver: "5.20.2.3c"
+    x-lang: "zh-CN"
+    nk: "NT"
+  auth:
+    type: "playwright_login" # session_cookie: 直接使用浏览器里复制的 Cookie 字符串; playwright_login: 用 Playwright 自动登录获取 Cookie
+    username: "username_global"
+    password: "password_global"
+    sso_base_url: "https://sso.garmin.com"
+    client_id: "GarminConnect"
+    locale: "en-US"
+    service_url: "https://connect.garmin.com/app/"
+    remember_me: true
+    captcha_token: ""
+    headless: false # Playwright 是否无头运行（true=不显示浏览器）
+    login_debug: false # 输出登录过程的详细日志
+    manual_login: false # 自动填表单前暂停，手动完成登录
+  endpoints:
+    upload_consent: "/gc-api/gdprconsent-service/feature/UPLOAD"
+    upload_activity: "/gc-api/upload-service/upload/.fit"
+  consent_params:
+    "_": "now" # 传当前毫秒时间，防止缓存
+
+sync:
+  mode: "full" # full: 中国站下载 + 国际站上传; download_only: 只下载; upload_only: 只上传
+  limit: 5
+  state_path: "state/uploaded.json" # 已上传记录缓存
+  dry_run: false # 只下载不上传（配合 full/download_only 仍会保存文件）
+  verbose: false # 输出更多日志（包含列表/上传调试信息）
+  download_dir: "assets/downloads" # 下载保存目录（download_only 或 full 时生效）
+  ignore_state: true # 忽略已上传缓存（强制重试）
+  upload_dir: "assets/downloads" # upload_only 模式下读取本地文件的目录
+  upload_glob: "*.fit" # upload_only 模式文件匹配规则
