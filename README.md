@@ -61,6 +61,22 @@ python scripts/get_cookie.py --config config.yaml --region china --output state/
 python scripts/get_cookie.py --config config.yaml --region china --write-config
 ```
 
+## macOS 打包（.app）
+
+生成可双击运行的 `.app`（包含 Playwright Chromium）：
+
+```bash
+bash scripts/build_mac_app.sh
+```
+
+产物在 `dist/GarminSync.app`，同时会生成 `dist/config.yaml`。分发时把 `GarminSync.app` 和 `config.yaml` 放在同一目录，先编辑 `config.yaml`，再双击运行应用。
+
+如果需要在终端查看日志：
+
+```bash
+open dist/GarminSync.app --args
+```
+
 ## 备注
 
 - 已上传的活动会记录在 `state/uploaded.json`，确保重复运行不会重复上传

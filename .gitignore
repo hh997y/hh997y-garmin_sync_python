@@ -4,6 +4,9 @@ __pycache__/
 .env
 state/
 assets/downloads/
+build/
+dist/
+playwright-browsers/
 .DS_Store
 .pytest_cache/
 .mypy_cache/

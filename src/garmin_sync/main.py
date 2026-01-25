@@ -4,8 +4,8 @@ from .config import load_config
 from .sync import sync_activities
 
 
-def main() -> None:
-    config = load_config("config.yaml")
+def main(config_path: str = "config.yaml") -> None:
+    config = load_config(config_path)
     sync_activities(config, limit=None, dry_run=None, verbose=config.sync.verbose)
 
 
