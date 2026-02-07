@@ -1,22 +1,24 @@
-# Garmin 中国站 -> 国际站同步
+# Garmin 中国站 <-> 国际站同步
 
-本项目用于从 Garmin 中国站下载最近的活动记录，并上传到 Garmin 国际站，自动跳过已上传的记录。
+本项目用于在 Garmin 中国站与国际站之间同步最近的活动记录，可配置为 CN -> Global、Global -> CN 或双向同步，并自动跳过已上传的记录。
 
 ## 快速开始
 
 1) 安装依赖
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 2) 编辑 `config.yaml`
 
 - 中国站/国际站认证方式只支持 `session_cookie` 或 `playwright_login`
 - 确认 endpoints 和 params 与你自己的站点一致
+- 通过 `sync.direction` 选择同步方向（`cn_to_global` / `global_to_cn` / `bidirectional`）
 - 通过 `sync.mode / sync.limit / sync.dry_run / sync.verbose` 控制行为
+- 使用 `global_to_cn` 或 `bidirectional` 时，需要补充 Global 的 `list/download` 端点与 China 的 `upload` 端点
 
 3) 运行
 
@@ -28,6 +30,9 @@ python run.py
 
 常见切换方式（修改 `config.yaml`）：
 
+- `sync.direction: cn_to_global` 中国站 -> 国际站
+- `sync.direction: global_to_cn` 国际站 -> 中国站
+- `sync.direction: bidirectional` 双向
 - `sync.mode: download_only` 只下载
 - `sync.mode: upload_only` 只上传（从 `sync.upload_dir` 读取本地文件）
 - `sync.dry_run: true` 只下载不上传
@@ -40,14 +45,14 @@ python run.py
 - `sync.ignore_state: true` 忽略上传缓存，强制重试
 - `sync.upload_dir` 用于只上传本地文件
 - 从目录上传时，文件名（不含后缀）会作为 activity_id 去重
-- 国际站上传通常需要 GDPR consent，请确保 `global.endpoints.upload_consent` 和 `global.consent_params` 配置正确
+- 上传到国际站通常需要 GDPR consent，请确保 `global.endpoints.upload_consent` 和 `global.consent_params` 配置正确
+- 如果目标是中国站且需要 consent，请补充 `china.endpoints.upload_consent` 与 `china.consent_params`
 
 ## Playwright 获取 Cookie（可选）
 
 如果你希望手动拿 Cookie：
 
 ```bash
-pip install -r scripts/requirements-playwright.txt
 python -m playwright install chromium
 python scripts/get_cookie.py --config config.yaml --region china --output state/cn_cookie.txt
 ```
@@ -79,7 +84,9 @@ open dist/GarminSync.app --args
 
 ## 备注
 
-- 已上传的活动会记录在 `state/uploaded.json`，确保重复运行不会重复上传
+- 已上传的活动会记录在 `state/uploaded.json`；当方向为 `global_to_cn` 时使用 `state/uploaded.global_to_cn.json`
+- 当 `sync.direction: bidirectional` 且设置了 `sync.download_dir`，会分别保存到 `download_dir/cn_to_global` 与 `download_dir/global_to_cn`
+- `sync.mode: upload_only` + `sync.direction: bidirectional` 会把同一目录文件上传到两端，如只需单向请将 direction 设为单向
 - 如果设置了 `sync.download_dir`，即使 `dry_run` 也会保存文件
 - 下载可能返回 ZIP，本程序会自动解压并取出 `.fit`
 - `list_params.limit` 会自动提高到至少 `sync.limit`

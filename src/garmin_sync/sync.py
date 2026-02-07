@@ -21,9 +21,72 @@ class Activity:
     raw: Dict[str, Any]
 
 
+@dataclass
+class SyncFlow:
+    key: str
+    source: RegionConfig
+    target: RegionConfig
+    source_label: str
+    target_label: str
+
+
 def log(message: str) -> None:
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
+
+
+def resolve_flows(config: AppConfig) -> List[SyncFlow]:
+    flows: List[SyncFlow] = []
+    if config.sync.direction in {"cn_to_global", "bidirectional"}:
+        flows.append(
+            SyncFlow(
+                key="cn_to_global",
+                source=config.china,
+                target=config.global_region,
+                source_label="CN",
+                target_label="Global",
+            )
+        )
+    if config.sync.direction in {"global_to_cn", "bidirectional"}:
+        flows.append(
+            SyncFlow(
+                key="global_to_cn",
+                source=config.global_region,
+                target=config.china,
+                source_label="Global",
+                target_label="CN",
+            )
+        )
+    return flows
+
+
+def resolve_state_path(base_path: Path, flow_key: str) -> Path:
+    if flow_key == "cn_to_global":
+        return base_path
+    suffix = f".{flow_key}"
+    if base_path.suffix:
+        return base_path.with_name(f"{base_path.stem}{suffix}{base_path.suffix}")
+    return base_path.with_name(f"{base_path.name}{suffix}")
+
+
+def resolve_download_dir(base_dir: Path | None, flow_key: str, split_by_flow: bool) -> Path | None:
+    if not base_dir:
+        return None
+    if split_by_flow:
+        return base_dir / flow_key
+    return base_dir
+
+
+def build_list_params(region: RegionConfig, sync_limit: int) -> Dict[str, Any]:
+    list_params = dict(region.list_params)
+    if "limit" in list_params:
+        try:
+            configured_limit = int(list_params["limit"])
+        except (TypeError, ValueError):
+            configured_limit = None
+        if configured_limit is None or sync_limit > configured_limit:
+            list_params["limit"] = sync_limit
+    return list_params
 
 
 def sync_activities(
@@ -32,90 +95,110 @@ def sync_activities(
     dry_run: bool | None = None,
     verbose: bool = False,
 ) -> None:
-    # 以配置为主，必要时提升列表拉取条数以覆盖 sync.limit。
     sync_limit = limit if limit is not None else config.sync.limit
     sync_dry_run = dry_run if dry_run is not None else config.sync.dry_run
-    list_params = dict(config.china.list_params)
-    if "limit" in list_params:
-        try:
-            configured_limit = int(list_params["limit"])
-        except (TypeError, ValueError):
-            configured_limit = None
-        if configured_limit is None or sync_limit > configured_limit:
-            list_params["limit"] = sync_limit
+    flows = resolve_flows(config)
+    split_download_dir = config.sync.direction == "bidirectional"
 
-    state = load_state(config.sync.state_path)
+    # 只上传本地文件时，仅登录目标站点。
+    if config.sync.mode == "upload_only":
+        if not config.sync.upload_dir:
+            raise ValueError("sync.upload_dir is required for upload_only mode")
+        for flow in flows:
+            state_path = resolve_state_path(config.sync.state_path, flow.key)
+            state = load_state(state_path)
+            state.setdefault("uploaded_ids", [])
+            state.setdefault("results", {})
+            uploaded_ids = set(state.get("uploaded_ids", []))
+
+            log(f"Upload-only: {flow.target_label} <- {config.sync.upload_dir}")
+            target_client = GarminApiClient(
+                flow.target.base_url,
+                flow.target.auth,
+                headers=flow.target.headers,
+            )
+            target_client.login()
+            if verbose:
+                target_client.session.headers.update({"X-Debug-Upload": "1"})
+            upload_from_dir(
+                target_client,
+                flow.target,
+                config.sync.upload_dir,
+                config.sync.upload_glob,
+                uploaded_ids,
+                config.sync.ignore_state,
+                sync_dry_run,
+                verbose,
+                state,
+                state_path,
+            )
+            if not sync_dry_run:
+                sync_uploaded_ids(state, uploaded_ids)
+                save_state(state_path, state)
+        return
+
+    for flow in flows:
+        sync_flow(
+            flow=flow,
+            config=config,
+            sync_limit=sync_limit,
+            sync_dry_run=sync_dry_run,
+            verbose=verbose,
+            split_download_dir=split_download_dir,
+        )
+
+
+def sync_flow(
+    flow: SyncFlow,
+    config: AppConfig,
+    sync_limit: int,
+    sync_dry_run: bool,
+    verbose: bool,
+    split_download_dir: bool,
+) -> None:
+    list_params = build_list_params(flow.source, sync_limit)
+    state_path = resolve_state_path(config.sync.state_path, flow.key)
+    state = load_state(state_path)
     state.setdefault("uploaded_ids", [])
     state.setdefault("results", {})
     uploaded_ids = set(state.get("uploaded_ids", []))
 
-    # 只上传本地文件时，不登录中国站。
-    if config.sync.mode == "upload_only":
-        if not config.sync.upload_dir:
-            raise ValueError("sync.upload_dir is required for upload_only mode")
-        global_client = GarminApiClient(
-            config.global_region.base_url,
-            config.global_region.auth,
-            headers=config.global_region.headers,
-        )
-        global_client.login()
-        if verbose:
-            global_client.session.headers.update({"X-Debug-Upload": "1"})
-        upload_from_dir(
-            global_client,
-            config.global_region,
-            config.sync.upload_dir,
-            config.sync.upload_glob,
-            uploaded_ids,
-            config.sync.ignore_state,
-            sync_dry_run,
-            verbose,
-            state,
-            config.sync.state_path,
-        )
-        if not sync_dry_run:
-            sync_uploaded_ids(state, uploaded_ids)
-            save_state(config.sync.state_path, state)
-        return
+    download_dir = resolve_download_dir(config.sync.download_dir, flow.key, split_download_dir)
 
-    china_client = None
-    global_client = None
-    # full/download_only 需要先登录中国站获取列表。
-    if config.sync.mode in {"full", "download_only"}:
-        china_client = GarminApiClient(
-            config.china.base_url,
-            config.china.auth,
-            headers=config.china.headers,
+    log(f"Sync: {flow.source_label} -> {flow.target_label} (mode={config.sync.mode})")
+    source_client = GarminApiClient(
+        flow.source.base_url,
+        flow.source.auth,
+        headers=flow.source.headers,
+    )
+    source_client.login()
+
+    target_client = None
+    if config.sync.mode == "full":
+        target_client = GarminApiClient(
+            flow.target.base_url,
+            flow.target.auth,
+            headers=flow.target.headers,
         )
-        china_client.login()
-    # full 模式还需要登录国际站上传。
-    if config.sync.mode in {"full"}:
-        global_client = GarminApiClient(
-            config.global_region.base_url,
-            config.global_region.auth,
-            headers=config.global_region.headers,
-        )
-        global_client.login()
+        target_client.login()
         if verbose:
-            global_client.session.headers.update({"X-Debug-Upload": "1"})
+            target_client.session.headers.update({"X-Debug-Upload": "1"})
 
     if verbose:
-        log(f"CN list endpoint: {config.china.endpoints.list_activities}")
-        log(f"CN list params: {list_params}")
-        csrf_token = china_client.session.headers.get("connect-csrf-token")
+        log(f"{flow.source_label} list endpoint: {flow.source.endpoints.list_activities}")
+        log(f"{flow.source_label} list params: {list_params}")
+        csrf_token = source_client.session.headers.get("connect-csrf-token")
         if csrf_token:
-            log(f"CN csrf token set (len={len(csrf_token)}): {csrf_token}")
+            log(f"{flow.source_label} csrf token set (len={len(csrf_token)}): {csrf_token}")
         else:
-            log("CN csrf token missing")
-        cookie_names = sorted({cookie.name for cookie in china_client.session.cookies})
+            log(f"{flow.source_label} csrf token missing")
+        cookie_names = sorted({cookie.name for cookie in source_client.session.cookies})
         if cookie_names:
-            log(f"CN cookies: {cookie_names}")
+            log(f"{flow.source_label} cookies: {cookie_names}")
 
-    if not china_client:
-        raise ValueError("china client not initialized for this mode")
     # 拉取活动列表并按时间倒序选取最近的 N 条。
-    activities = fetch_activities(china_client, config.china, list_params=list_params, verbose=verbose)
-    activities = sort_activities(activities, config.china.sort_key)
+    activities = fetch_activities(source_client, flow.source, list_params=list_params, verbose=verbose)
+    activities = sort_activities(activities, flow.source.sort_key)
     selected = activities[:sync_limit]
 
     if verbose:
@@ -128,27 +211,27 @@ def sync_activities(
             log(f"Already uploaded activity {activity.activity_id}")
             record_result(state, activity.activity_id, "already_uploaded")
             sync_uploaded_ids(state, uploaded_ids)
-            save_state(config.sync.state_path, state)
+            save_state(state_path, state)
             continue
 
         log(f"Downloading activity {activity.activity_id}")
-        activity_bytes = download_activity(china_client, config.china, activity.activity_id)
-        maybe_save_download(config.sync.download_dir, activity.activity_id, activity_bytes)
+        activity_bytes = download_activity(source_client, flow.source, activity.activity_id)
+        maybe_save_download(download_dir, activity.activity_id, activity_bytes)
 
         if sync_dry_run or config.sync.mode == "download_only":
             log(f"Dry run: would upload activity {activity.activity_id}")
             record_result(state, activity.activity_id, "dry_run")
             sync_uploaded_ids(state, uploaded_ids)
-            save_state(config.sync.state_path, state)
+            save_state(state_path, state)
             continue
 
-        if not global_client:
-            raise ValueError("global client not initialized for this mode")
+        if not target_client:
+            raise ValueError("target client not initialized for this mode")
         if not consent_done:
-            # 国际站上传前需要 GDPR consent。
-            ensure_upload_consent(global_client, config.global_region, verbose)
+            # 上传前如需 GDPR consent，先执行一次。
+            ensure_upload_consent(target_client, flow.target, verbose)
             consent_done = True
-        result = upload_activity(global_client, config.global_region, activity.activity_id, activity_bytes)
+        result = upload_activity(target_client, flow.target, activity.activity_id, activity_bytes)
         if result == "already_uploaded":
             log(f"Already uploaded activity {activity.activity_id}")
             uploaded_ids.add(activity.activity_id)
@@ -158,7 +241,7 @@ def sync_activities(
             uploaded_ids.add(activity.activity_id)
             record_result(state, activity.activity_id, "uploaded")
         sync_uploaded_ids(state, uploaded_ids)
-        save_state(config.sync.state_path, state)
+        save_state(state_path, state)
 
 
 def fetch_activities(

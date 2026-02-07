@@ -23,7 +23,14 @@ def _resolve_config_path(repo_root: Path) -> Path:
 def _configure_playwright_browsers(repo_root: Path) -> None:
     if "PLAYWRIGHT_BROWSERS_PATH" in os.environ:
         return
-    bundle_root = Path(getattr(sys, "_MEIPASS", repo_root))
+    # In dev/source runs, let Playwright use its default cache directory.
+    # Only force a browsers path when running from a PyInstaller bundle (.app),
+    # where we ship browsers inside the app resources.
+    bundle_root_value = getattr(sys, "_MEIPASS", None)
+    if not bundle_root_value:
+        return
+
+    bundle_root = Path(bundle_root_value)
     bundled_browsers = bundle_root / "playwright-browsers"
     if not bundled_browsers.exists():
         exe_parent = Path(sys.executable).resolve().parent

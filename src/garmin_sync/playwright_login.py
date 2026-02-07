@@ -68,7 +68,14 @@ def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True
             _log("[login] goto sign-in page")
         # 打开 SSO 登录页，等待基础 DOM 就绪即可。
         page.goto(signin_url, wait_until="domcontentloaded")
-        page.wait_for_load_state("networkidle")
+        # Many modern login pages keep background requests open (analytics/long-poll),
+        # so waiting for "networkidle" can hang even when the UI is fully rendered.
+        # Treat it as best-effort; the real gate is detecting the login form.
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except PlaywrightTimeoutError:
+            if debug:
+                _log("[login] networkidle timeout; continuing")
         if debug:
             _log(f"[login] sign-in page loaded in {time.monotonic() - start:.1f}s")
         # 只有检测到验证码时才等待 cf_clearance。

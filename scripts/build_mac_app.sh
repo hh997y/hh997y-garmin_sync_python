@@ -10,7 +10,6 @@ fi
 
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -r scripts/requirements-playwright.txt
 pip install pyinstaller
 
 # Install Chromium into a project-local folder so it can be bundled.

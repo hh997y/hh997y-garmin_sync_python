@@ -18,6 +18,7 @@ class SyncConfig:
     upload_dir: Path | None
     upload_glob: str | None
     mode: str
+    direction: str
 
 
 @dataclass
@@ -104,6 +105,9 @@ def _parse_sync(data: Dict[str, Any]) -> SyncConfig:
     mode = str(data.get("mode", "full"))
     if mode not in {"full", "download_only", "upload_only"}:
         raise ConfigError("sync.mode must be one of: full, download_only, upload_only")
+    direction = str(data.get("direction", "cn_to_global"))
+    if direction not in {"cn_to_global", "global_to_cn", "bidirectional"}:
+        raise ConfigError("sync.direction must be one of: cn_to_global, global_to_cn, bidirectional")
     return SyncConfig(
         limit=limit,
         state_path=state_path,
@@ -114,6 +118,7 @@ def _parse_sync(data: Dict[str, Any]) -> SyncConfig:
         upload_dir=upload_dir,
         upload_glob=upload_glob,
         mode=mode,
+        direction=direction,
     )
 
 
