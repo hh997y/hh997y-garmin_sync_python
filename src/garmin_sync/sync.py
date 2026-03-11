@@ -89,6 +89,22 @@ def build_list_params(region: RegionConfig, sync_limit: int) -> Dict[str, Any]:
     return list_params
 
 
+def build_client_cache_key(region: RegionConfig) -> tuple[str, str, str, tuple[tuple[str, str], ...]]:
+    return (
+        region.base_url.rstrip("/"),
+        region.auth.type,
+        region.auth.username or "",
+        tuple(sorted(region.headers.items())),
+    )
+
+
+def configure_upload_debug_header(client: GarminApiClient, enabled: bool) -> None:
+    if enabled:
+        client.session.headers.update({"X-Debug-Upload": "1"})
+        return
+    client.session.headers.pop("X-Debug-Upload", None)
+
+
 def sync_activities(
     config: AppConfig,
     limit: int | None = None,
@@ -99,58 +115,76 @@ def sync_activities(
     sync_dry_run = dry_run if dry_run is not None else config.sync.dry_run
     flows = resolve_flows(config)
     split_download_dir = config.sync.direction == "bidirectional"
+    client_cache: Dict[tuple[str, str, str, tuple[tuple[str, str], ...]], GarminApiClient] = {}
 
-    # 只上传本地文件时，仅登录目标站点。
-    if config.sync.mode == "upload_only":
-        if not config.sync.upload_dir:
-            raise ValueError("sync.upload_dir is required for upload_only mode")
+    def get_client(region: RegionConfig) -> GarminApiClient:
+        key = build_client_cache_key(region)
+        client = client_cache.get(key)
+        if client is None:
+            client = GarminApiClient(
+                region.base_url,
+                region.auth,
+                headers=region.headers,
+            )
+            client_cache[key] = client
+        return client
+
+    try:
+        # 只上传本地文件时，仅登录目标站点。
+        if config.sync.mode == "upload_only":
+            if not config.sync.upload_dir:
+                raise ValueError("sync.upload_dir is required for upload_only mode")
+            for flow in flows:
+                state_path = resolve_state_path(config.sync.state_path, flow.key)
+                state = load_state(state_path)
+                state.setdefault("uploaded_ids", [])
+                state.setdefault("results", {})
+                uploaded_ids = set(state.get("uploaded_ids", []))
+
+                log(f"Upload-only: {flow.target_label} <- {config.sync.upload_dir}")
+                target_client = get_client(flow.target)
+                target_client.login()
+                configure_upload_debug_header(target_client, verbose)
+                upload_from_dir(
+                    target_client,
+                    flow.target,
+                    config.sync.upload_dir,
+                    config.sync.upload_glob,
+                    uploaded_ids,
+                    config.sync.ignore_state,
+                    sync_dry_run,
+                    verbose,
+                    state,
+                    state_path,
+                )
+                if not sync_dry_run:
+                    sync_uploaded_ids(state, uploaded_ids)
+                    save_state(state_path, state)
+            return
+
         for flow in flows:
-            state_path = resolve_state_path(config.sync.state_path, flow.key)
-            state = load_state(state_path)
-            state.setdefault("uploaded_ids", [])
-            state.setdefault("results", {})
-            uploaded_ids = set(state.get("uploaded_ids", []))
-
-            log(f"Upload-only: {flow.target_label} <- {config.sync.upload_dir}")
-            target_client = GarminApiClient(
-                flow.target.base_url,
-                flow.target.auth,
-                headers=flow.target.headers,
+            source_client = get_client(flow.source)
+            target_client = get_client(flow.target) if config.sync.mode == "full" else None
+            sync_flow(
+                flow=flow,
+                config=config,
+                source_client=source_client,
+                target_client=target_client,
+                sync_limit=sync_limit,
+                sync_dry_run=sync_dry_run,
+                verbose=verbose,
+                split_download_dir=split_download_dir,
             )
-            target_client.login()
-            if verbose:
-                target_client.session.headers.update({"X-Debug-Upload": "1"})
-            upload_from_dir(
-                target_client,
-                flow.target,
-                config.sync.upload_dir,
-                config.sync.upload_glob,
-                uploaded_ids,
-                config.sync.ignore_state,
-                sync_dry_run,
-                verbose,
-                state,
-                state_path,
-            )
-            if not sync_dry_run:
-                sync_uploaded_ids(state, uploaded_ids)
-                save_state(state_path, state)
-        return
-
-    for flow in flows:
-        sync_flow(
-            flow=flow,
-            config=config,
-            sync_limit=sync_limit,
-            sync_dry_run=sync_dry_run,
-            verbose=verbose,
-            split_download_dir=split_download_dir,
-        )
+    finally:
+        for client in client_cache.values():
+            client.session.close()
 
 
 def sync_flow(
     flow: SyncFlow,
     config: AppConfig,
+    source_client: GarminApiClient,
+    target_client: GarminApiClient | None,
     sync_limit: int,
     sync_dry_run: bool,
     verbose: bool,
@@ -166,23 +200,14 @@ def sync_flow(
     download_dir = resolve_download_dir(config.sync.download_dir, flow.key, split_download_dir)
 
     log(f"Sync: {flow.source_label} -> {flow.target_label} (mode={config.sync.mode})")
-    source_client = GarminApiClient(
-        flow.source.base_url,
-        flow.source.auth,
-        headers=flow.source.headers,
-    )
     source_client.login()
+    configure_upload_debug_header(source_client, False)
 
-    target_client = None
     if config.sync.mode == "full":
-        target_client = GarminApiClient(
-            flow.target.base_url,
-            flow.target.auth,
-            headers=flow.target.headers,
-        )
+        if not target_client:
+            raise ValueError("target client not initialized for this mode")
         target_client.login()
-        if verbose:
-            target_client.session.headers.update({"X-Debug-Upload": "1"})
+        configure_upload_debug_header(target_client, verbose)
 
     if verbose:
         log(f"{flow.source_label} list endpoint: {flow.source.endpoints.list_activities}")

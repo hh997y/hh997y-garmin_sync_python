@@ -71,7 +71,7 @@ global:
     "_": "now" # 传当前毫秒时间，防止缓存
 
 sync:
-  direction: "cn_to_global" # cn_to_global / global_to_cn / bidirectional
+  direction: "bidirectional" # cn_to_global / global_to_cn / bidirectional
   mode: "full" # full: 下载 + 上传（方向由 sync.direction 控制）; download_only: 只下载; upload_only: 只上传
   limit: 5
   state_path: "state/uploaded.json" # 已上传记录缓存

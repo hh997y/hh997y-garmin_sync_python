@@ -24,14 +24,19 @@ class GarminApiClient:
         self.base_url = base_url.rstrip("/")
         self.auth = auth
         self.session = requests.Session()
+        self._logged_in = False
         if headers:
             self.session.headers.update(headers)
 
     def login(self) -> None:
+        if self._logged_in:
+            return
+
         if self.auth.type == "session_cookie":
             if not self.auth.cookie:
                 raise ValueError("session_cookie auth requires cookie value")
             self._apply_cookie_header(self.auth.cookie)
+            self._logged_in = True
             return
 
         if self.auth.type == "playwright_login":
@@ -43,6 +48,7 @@ class GarminApiClient:
             self._apply_cookie_header(cookie_header)
             if csrf_token:
                 self.session.headers.update({"connect-csrf-token": csrf_token})
+            self._logged_in = True
             return
 
         raise ValueError(f"Unsupported auth type {self.auth.type}")

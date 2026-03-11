@@ -11,6 +11,7 @@ playwright-browsers/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pre-commit-cache/
 .vscode/
 .idea/
 .python-version
