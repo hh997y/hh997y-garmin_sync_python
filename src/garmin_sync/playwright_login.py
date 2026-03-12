@@ -20,6 +20,15 @@ def _log(message: str) -> None:
     print(f"[{timestamp}] {message}")
 
 
+def _is_on_app_domain(page, base_url: str) -> bool:
+    if not base_url:
+        return False
+    try:
+        return page.url.startswith(base_url.rstrip("/") + "/")
+    except Exception:
+        return False
+
+
 def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True) -> tuple[str, str | None]:
     if not auth.username or not auth.password:
         raise ValueError("playwright_login auth requires username and password")
@@ -99,17 +108,20 @@ def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True
                 _log("[login] submitting form")
             _click_first(page, _SUBMIT_SELECTORS)
         # 捕获 SSO login 接口响应，提取 ticket/重定向信息。
-        login_response = _wait_for_login_response(page, login_capture, timeout_ms=6000)
+        login_response, reached_app = _wait_for_login_signal(
+            page, login_capture, base_url=base_url, timeout_ms=6000
+        )
         if not login_response and login_capture:
             login_response = login_capture
-        if not login_response:
+        if not login_response and not reached_app:
             try:
                 page.wait_for_url(
                     f"{base_url.rstrip('/')}/*", timeout=5000, wait_until="domcontentloaded"
                 )
             except PlaywrightTimeoutError:
                 pass
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
+        reached_app = reached_app or _is_on_app_domain(page, base_url)
+        already_on_app = reached_app
         if already_on_app and not login_response and debug:
             _log(f"[login] on app domain without login response (url={page.url})")
         if debug and login_response:
@@ -117,20 +129,23 @@ def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True
                 f"[login] login response status={login_response['status']} url={login_response['url']}"
             )
         redeemed = _redeem_service_ticket(context, login_response, debug=debug)
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
+        already_on_app = _is_on_app_domain(page, base_url)
         logged_in = already_on_app
         direct_login = None
-        if not login_response:
+        if not login_response and not already_on_app:
             # Give the response listener a moment to populate after navigation churn.
-            login_response = _wait_for_login_response(page, login_capture, timeout_ms=3000)
+            login_response, reached_app = _wait_for_login_signal(
+                page, login_capture, base_url=base_url, timeout_ms=3000
+            )
             if login_response and debug:
                 _log(
                     f"[login] late login response status={login_response['status']} url={login_response['url']}"
                 )
                 redeemed = _redeem_service_ticket(context, login_response, debug=debug)
+            already_on_app = reached_app or _is_on_app_domain(page, base_url)
         if not login_response and login_capture:
             login_response = login_capture
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
+        already_on_app = _is_on_app_domain(page, base_url)
         logged_in = already_on_app or bool(login_response)
         if already_on_app and debug:
             _log(f"[login] already on app domain; skipping fallback (url={page.url})")
@@ -150,9 +165,7 @@ def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True
             except Exception:
                 if debug:
                     _log("[login] failed to load /modern/ after redeem")
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
-        already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
+        already_on_app = _is_on_app_domain(page, base_url)
         logged_in = logged_in or already_on_app
         error_banner = _read_error_banner(page)
         if error_banner and not direct_login and not redeemed and not logged_in:
@@ -160,7 +173,7 @@ def login_with_playwright(base_url: str, auth: AuthConfig, headless: bool = True
         if not login_response and not logged_in:
             try:
                 wait_timeout = 60000 if manual_login else 8000
-                already_on_app = page.url.startswith(base_url.rstrip("/") + "/")
+                already_on_app = _is_on_app_domain(page, base_url)
                 if not already_on_app:
                     page.wait_for_url(
                         f"{base_url.rstrip('/')}/*",
@@ -343,17 +356,20 @@ def _fetch_app_html(
     return None
 
 
-def _wait_for_login_response(
+def _wait_for_login_signal(
     page,
     login_capture: dict[str, Any],
+    base_url: str,
     timeout_ms: int = 60000,
-) -> dict | None:
+) -> tuple[dict | None, bool]:
     deadline = time.monotonic() + (timeout_ms / 1000)
     while time.monotonic() < deadline:
         if login_capture:
-            return login_capture
+            return login_capture, False
+        if _is_on_app_domain(page, base_url):
+            return None, True
         time.sleep(0.2)
-    return None
+    return None, _is_on_app_domain(page, base_url)
 
 
 def _dump_login_debug(page) -> None:
