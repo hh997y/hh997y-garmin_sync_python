@@ -12,13 +12,18 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-2) 编辑 `config.yaml`
+2) 创建并编辑本地 `config.yaml`
+
+```bash
+cp config.example.yaml config.yaml
+```
 
 - 中国站/国际站认证方式只支持 `session_cookie` 或 `playwright_login`
 - 确认 endpoints 和 params 与你自己的站点一致
 - 通过 `sync.direction` 选择同步方向（`cn_to_global` / `global_to_cn` / `bidirectional`）
 - 通过 `sync.mode / sync.limit / sync.dry_run / sync.verbose` 控制行为
 - 使用 `global_to_cn` 或 `bidirectional` 时，需要补充 Global 的 `list/download` 端点与 China 的 `upload` 端点
+- `config.example.yaml` 会保留在仓库里，真实账号密码只写入本地 `config.yaml`
 
 3) 运行
 
@@ -26,9 +31,9 @@ python -m pip install -r requirements.txt
 python run.py
 ```
 
-`run.py` 固定读取当前目录下的 `config.yaml`。
+`run.py` 固定读取当前目录下的 `config.yaml`；如果不存在，请先从 `config.example.yaml` 复制一份。
 
-常见切换方式（修改 `config.yaml`）：
+常见切换方式（修改本地 `config.yaml`）：
 
 - `sync.direction: cn_to_global` 中国站 -> 国际站
 - `sync.direction: global_to_cn` 国际站 -> 中国站
@@ -60,7 +65,7 @@ python scripts/get_cookie.py --config config.yaml --region china --output state/
 将输出粘贴到 `china.auth.cookie`，并设置 `china.auth.type: session_cookie`。
 也可以直接使用 `auth.type: playwright_login`，运行时自动拿 Cookie。
 
-如需自动写回 `config.yaml`：
+如需自动写回本地 `config.yaml`：
 
 ```bash
 python scripts/get_cookie.py --config config.yaml --region china --write-config
@@ -74,7 +79,7 @@ python scripts/get_cookie.py --config config.yaml --region china --write-config
 bash scripts/build_mac_app.sh
 ```
 
-产物在 `dist/GarminSync.app`，同时会生成 `dist/config.yaml`。分发时把 `GarminSync.app` 和 `config.yaml` 放在同一目录，先编辑 `config.yaml`，再双击运行应用。
+产物在 `dist/GarminSync.app`，同时会生成 `dist/config.yaml`。这个 `dist/config.yaml` 来自仓库里的 `config.example.yaml`。分发时把 `GarminSync.app` 和 `config.yaml` 放在同一目录，先编辑 `config.yaml`，再双击运行应用。
 
 如果需要在终端查看日志：
 
@@ -95,5 +100,6 @@ open dist/GarminSync.app --args
 ## 目录结构
 
 - `src/garmin_sync/`: 核心逻辑
-- `config.yaml`: 配置文件
+- `config.example.yaml`: 配置模板
+- `config.yaml`: 本地私有配置（不纳入版本控制）
 - `state/`: 已上传记录缓存

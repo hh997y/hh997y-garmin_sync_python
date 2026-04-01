@@ -18,3 +18,4 @@ playwright-browsers/
 AGENTS.md
 login_post.txt
 curl.txt
+config.yaml

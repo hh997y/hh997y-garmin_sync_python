@@ -17,7 +17,15 @@ def _resolve_config_path(repo_root: Path) -> Path:
         if external_config.exists():
             return external_config
 
-    return repo_root / "config.yaml"
+    bundled_config = repo_root / "config.yaml"
+    if bundled_config.exists():
+        return bundled_config
+
+    example_config = repo_root / "config.example.yaml"
+    raise FileNotFoundError(
+        "config.yaml not found. Copy config.example.yaml to config.yaml and fill in your local credentials. "
+        f"Expected config at {config_path} or {bundled_config}; template available at {example_config}."
+    )
 
 
 def _configure_playwright_browsers(repo_root: Path) -> None:

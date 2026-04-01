@@ -19,6 +19,13 @@ class ApiResponse:
     raw: requests.Response
 
 
+def _accept_language(locale: str | None) -> str | None:
+    if not locale:
+        return None
+    primary = locale.split("-")[0]
+    return f"{locale},{primary};q=0.9"
+
+
 class GarminApiClient:
     def __init__(self, base_url: str, auth: AuthConfig, headers: Optional[Dict[str, str]] = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -27,6 +34,16 @@ class GarminApiClient:
         self._logged_in = False
         if headers:
             self.session.headers.update(headers)
+        if auth.user_agent:
+            self.session.headers.update({"User-Agent": auth.user_agent})
+        if self.session.headers.get("Accept") in {None, "*/*"}:
+            self.session.headers.update({"Accept": "application/json, text/javascript, */*; q=0.01"})
+        accept_language = _accept_language(auth.locale)
+        if accept_language:
+            self.session.headers.setdefault("Accept-Language", accept_language)
+        self.session.headers.setdefault("Sec-Fetch-Dest", "empty")
+        self.session.headers.setdefault("Sec-Fetch-Mode", "cors")
+        self.session.headers.setdefault("Sec-Fetch-Site", "same-origin")
 
     def login(self) -> None:
         if self._logged_in:
