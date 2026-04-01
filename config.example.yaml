@@ -10,7 +10,7 @@ china:
   auth:
     type: "playwright_login" # session_cookie: 直接使用浏览器里复制的 Cookie 字符串; playwright_login: 用 Playwright 自动登录获取 Cookie
     username: "username_cn"
-    password: "password_cn"
+    password: "password_cn" # pragma: allowlist secret
     sso_base_url: "https://sso.garmin.cn"
     client_id: "GarminConnect"
     locale: "zh-CN"
@@ -42,13 +42,13 @@ global:
     X-Requested-With: "XMLHttpRequest"
     Origin: "https://connect.garmin.com"
     Referer: "https://connect.garmin.com/app/"
-    x-app-ver: "5.20.2.3c"
+    x-app-ver: "5.23.0.33"
     x-lang: "zh-CN"
     nk: "NT"
   auth:
     type: "playwright_login" # session_cookie: 直接使用浏览器里复制的 Cookie 字符串; playwright_login: 用 Playwright 自动登录获取 Cookie
     username: "username_global"
-    password: "password_global"
+    password: "password_global" # pragma: allowlist secret
     sso_base_url: "https://sso.garmin.com"
     client_id: "GarminConnect"
     locale: "en-US"

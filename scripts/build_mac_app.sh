@@ -24,5 +24,5 @@ mkdir -p "$app_resources"
 rm -rf "$app_resources/playwright-browsers"
 cp -R "playwright-browsers" "$app_resources/playwright-browsers"
 
-# Copy config.yaml next to the .app for easy editing.
-cp -f "config.yaml" "dist/config.yaml"
+# Copy the template config next to the .app for easy editing.
+cp -f "config.example.yaml" "dist/config.yaml"

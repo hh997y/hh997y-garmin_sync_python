@@ -328,9 +328,17 @@ def download_activity(client: GarminApiClient, region: RegionConfig, activity_id
     path = region.endpoints.download_activity.format(activity_id=activity_id)
     response = client.get_bytes(path)
     content = response.data
-    # 下载结果可能是 ZIP，自动解压 FIT。
-    if is_zip_bytes(content):
-        return extract_fit_from_zip(content, activity_id)
+    if should_extract_zip(response, content):
+        try:
+            return extract_fit_from_zip(content, activity_id)
+        except zipfile.BadZipFile:
+            retry_response = client.get_bytes(path)
+            retry_content = retry_response.data
+            if is_valid_zip_bytes(retry_content):
+                return extract_fit_from_zip(retry_content, activity_id)
+            raise RuntimeError(
+                f"Downloaded activity {activity_id} as ZIP twice, but both responses were invalid archives"
+            )
     return content
 
 
@@ -346,7 +354,7 @@ def upload_activity(client: GarminApiClient, region: RegionConfig, activity_id: 
         if response is not None and response.status_code == 409:
             # 409 表示已上传过该活动。
             return "already_uploaded"
-        raise
+        raise_upload_http_error(response, region, operation="upload activity")
     return "uploaded"
 
 
@@ -354,9 +362,42 @@ def ensure_upload_consent(client: GarminApiClient, region: RegionConfig, verbose
     if not region.endpoints.upload_consent:
         return
     params = resolve_consent_params(region.consent_params)
-    response = client.get_json(region.endpoints.upload_consent, params=params or None)
+    try:
+        response = client.get_json(region.endpoints.upload_consent, params=params or None)
+    except requests.HTTPError as exc:
+        raise_upload_http_error(exc.response, region, operation="request upload consent")
     if verbose:
         log(f"Upload consent status: {response.status_code}")
+
+
+def raise_upload_http_error(
+    response: requests.Response | None,
+    region: RegionConfig,
+    operation: str,
+) -> None:
+    if response is None:
+        raise RuntimeError(f"Failed to {operation}: no HTTP response")
+
+    server = response.headers.get("Server", "")
+    content_type = response.headers.get("Content-Type", "")
+    snippet = response.text.replace("\n", " ").strip()[:200]
+    detail_parts = [f"status={response.status_code}", f"url={response.url}"]
+    if server:
+        detail_parts.append(f"server={server}")
+    if content_type:
+        detail_parts.append(f"content_type={content_type}")
+    if snippet:
+        detail_parts.append(f"body={snippet}")
+    detail = ", ".join(detail_parts)
+
+    if response.status_code == 403 and server.lower() == "cloudflare":
+        raise RuntimeError(
+            f"Failed to {operation} for {region.base_url}: Cloudflare returned 403. "
+            "Login and activity download may still work, but Garmin's upload endpoints are currently blocking this session. "
+            f"Details: {detail}"
+        )
+
+    raise RuntimeError(f"Failed to {operation} for {region.base_url}. Details: {detail}")
 
 
 def resolve_consent_params(params: Dict[str, Any]) -> Dict[str, Any]:
@@ -453,8 +494,18 @@ def maybe_save_download(download_dir: Path | None, activity_id: str, content: by
     path.write_bytes(content)
 
 
-def is_zip_bytes(content: bytes) -> bool:
-    return len(content) >= 4 and content[:2] == b"PK"
+def should_extract_zip(response, content: bytes) -> bool:
+    content_type = (response.raw.headers.get("Content-Type") or "").lower()
+    content_disposition = (response.raw.headers.get("Content-Disposition") or "").lower()
+    if "zip" in content_type or ".zip" in content_disposition:
+        return True
+    return is_valid_zip_bytes(content)
+
+
+def is_valid_zip_bytes(content: bytes) -> bool:
+    if len(content) < 4 or content[:2] != b"PK":
+        return False
+    return zipfile.is_zipfile(io.BytesIO(content))
 
 
 def extract_fit_from_zip(content: bytes, activity_id: str) -> bytes:
